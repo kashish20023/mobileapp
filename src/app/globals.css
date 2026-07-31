@@ -1,26 +1,87 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #090a0f;
+  --foreground: #f8fafc;
+  --primary: #6366f1;
+  --primary-hover: #4f46e5;
+  --border: #1e293b;
+  --card-bg: rgba(15, 23, 42, 0.65);
+  --card-border: rgba(255, 255, 255, 0.08);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-border: var(--border);
+  --color-card-bg: var(--card-bg);
+  --color-card-border: var(--card-border);
+  
+  --font-sans: 'Outfit', 'Inter', sans-serif;
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-image: 
+    radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%),
+    radial-gradient(at 50% 0%, hsla(225,39%,30%,0.25) 0, transparent 50%),
+    radial-gradient(at 100% 0%, hsla(263,45%,20%,0.15) 0, transparent 50%);
+  background-attachment: fixed;
+  overflow-x: hidden;
+  font-family: var(--font-sans);
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.3);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.6);
+}
+
+/* Glassmorphism utility */
+.glass-panel {
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-panel-light {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Glowing text/shadow effects */
+.glow-primary {
+  text-shadow: 0 0 10px rgba(99, 102, 241, 0.5);
+}
+
+.glow-box {
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.15);
+}
+
+/* Code Syntax Highlighting colors */
+.json-key { color: #f87171; }      /* red */
+.json-string { color: #34d399; }   /* green */
+.json-number { color: #facc15; }   /* yellow */
+.json-boolean { color: #38bdf8; }  /* blue */
+.json-null { color: #a78bfa; }     /* purple */
+
+/* Custom phone frame details */
+.phone-notch {
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
 }
