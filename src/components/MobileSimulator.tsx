@@ -69,6 +69,7 @@ export default function MobileSimulator() {
     category?: string;
     facing?: string;
     amenities?: string[];
+    nearBy?: string[];
   } | null>(null);
   const [aiResultsProperties, setAiResultsProperties] = useState<any[]>([]);
 
@@ -329,13 +330,21 @@ export default function MobileSimulator() {
       if (/security|24\/7/i.test(userMsg)) reqAmenities.push('24/7 Security');
       if (/power backup|backup/i.test(userMsg)) reqAmenities.push('Power Backup');
 
+      // NearBy / Proximity Landmark extraction
+      const reqNearBy: string[] = [];
+      if (/airport/i.test(userMsg)) reqNearBy.push('Airport');
+      if (/metro|station/i.test(userMsg)) reqNearBy.push('Metro Station');
+      if (/hospital|fortis/i.test(userMsg)) reqNearBy.push('Hospital');
+      if (/school|college/i.test(userMsg)) reqNearBy.push('School');
+      if (/mall|shopping/i.test(userMsg)) reqNearBy.push('Shopping Mall');
+
       const badgeParts = [];
       if (bhk) badgeParts.push(`${bhk} BHK`);
       if (category) badgeParts.push(category);
       if (location) badgeParts.push(`in ${location}`);
 
       setExtractedBadge(badgeParts.join(' '));
-      setActiveSearchParams({ location, bhk, category, facing: reqFacing, amenities: reqAmenities });
+      setActiveSearchParams({ location, bhk, category, facing: reqFacing, amenities: reqAmenities, nearBy: reqNearBy });
 
       // 2. Save buyer preferences to backend
       const payload = { preferredLocation: location, propertyType: category, bhk, budgetRange: budget, purpose: 'sale' };
@@ -349,6 +358,76 @@ export default function MobileSimulator() {
         matchesRes = await api.request('GET', '/properties').catch(() => null);
         matchedList = Array.isArray(matchesRes) ? matchesRes : matchesRes?.data || [];
       }
+
+      // 4. Calculate AI Match score & rank properties strictly according to extracted preferences
+      const maxPrice = budget ? parseFloat(budget.replace(/[^0-9.]/g, '')) * (budget.includes('Cr') || budget.includes('cr') ? 10000000 : budget.includes('Lakh') || budget.includes('lakh') || budget.includes('L') ? 100000 : 1) : 0;
+
+      matchedList = matchedList.map((p: any) => {
+        let score = 50; // base score
+        const pCategory = (p.category || '').toLowerCase();
+        const pTitle = (p.title || '').toLowerCase();
+        const pAddress = `${p.streetAddress || ''} ${p.city || ''} ${p.locality || ''}`.toLowerCase();
+        const pBhk = String(p.bedrooms || 0);
+        const pPrice = parseFloat(p.price || '0');
+
+        let catMatch = false;
+        if (category && category !== 'Property') {
+          const searchCat = category.toLowerCase();
+          if (pCategory.includes(searchCat) || pTitle.includes(searchCat)) {
+            score += 25;
+            catMatch = true;
+          }
+        }
+
+        let bhkMatch = false;
+        if (bhk) {
+          if (pBhk === String(bhk) || pTitle.includes(`${bhk} bhk`)) {
+            score += 15;
+            bhkMatch = true;
+          }
+        }
+
+        let locMatch = false;
+        if (location && location !== 'Jaipur') {
+          const searchLoc = location.toLowerCase().split(',')[0].trim();
+          if (pAddress.includes(searchLoc) || pTitle.includes(searchLoc)) {
+            score += 10;
+            locMatch = true;
+          }
+        }
+
+        if (maxPrice > 0 && pPrice > 0 && pPrice <= maxPrice * 1.1) {
+          score += 10;
+        }
+
+        const finalScore = Math.min(Math.max(score, 60), 99);
+
+        // Natural language AI match rationale
+        let rationale = `${finalScore}% Match: `;
+        if (catMatch && bhkMatch && locMatch) {
+          rationale += `Exact match for ${bhk} BHK ${category} in ${location} fitting your budget.`;
+        } else if (catMatch && bhkMatch) {
+          rationale += `Matches ${bhk} BHK ${category} in ${p.city || 'Jaipur'}.`;
+        } else if (catMatch) {
+          rationale += `Matches requested ${category} type.`;
+        } else {
+          rationale += `Recommended property matching your general location & price range.`;
+        }
+
+        return {
+          ...p,
+          matchScore: finalScore,
+          explanation: rationale,
+        };
+      });
+
+      // 5. Sort properties: properties matching category & BHK first, then by matchScore descending!
+      matchedList.sort((a: any, b: any) => {
+        const aCatMatch = category && (a.category || '').toLowerCase().includes(category.toLowerCase()) ? 1 : 0;
+        const bCatMatch = category && (b.category || '').toLowerCase().includes(category.toLowerCase()) ? 1 : 0;
+        if (aCatMatch !== bCatMatch) return bCatMatch - aCatMatch;
+        return (b.matchScore || 0) - (a.matchScore || 0);
+      });
 
       setAiResultsProperties(matchedList);
 
@@ -928,7 +1007,7 @@ export default function MobileSimulator() {
                           <div className="relative h-32 w-full bg-slate-900">
                             <img src={cover} alt={prop.title} className="w-full h-full object-cover" />
                             <span className="absolute top-2.5 left-2.5 text-[9px] font-bold bg-indigo-600 text-white px-2 py-0.5 rounded-md shadow">
-                              AI Match: {95 - idx * 3}%
+                              AI Match: {prop.matchScore ? `${prop.matchScore}%` : `${95 - idx * 3}%`}
                             </span>
                             <button
                               onClick={(e) => toggleWishlist(prop, e)}
@@ -945,11 +1024,17 @@ export default function MobileSimulator() {
                             <h5 className="text-xs font-bold text-white truncate">{prop.title}</h5>
                             <p className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5 truncate">
                               <MapPin size={11} className="text-indigo-400 shrink-0" />
-                              {prop.streetAddress || prop.city}
+                              {prop.streetAddress || prop.locality || prop.city}
                             </p>
 
+                            {prop.explanation && (
+                              <p className="text-[9px] text-emerald-300 bg-emerald-950/60 border border-emerald-800/40 px-2 py-1 rounded-md mt-1.5 line-clamp-2">
+                                ✨ {prop.explanation}
+                              </p>
+                            )}
+
                             <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-slate-900 text-[10px]">
-                              <span className="text-slate-400">{prop.bedrooms || 3} BHK · {prop.category}</span>
+                              <span className="text-slate-400">{prop.bedrooms || 3} BHK · {prop.category || 'Property'}</span>
                               <span className="text-indigo-400 font-bold hover:underline">View Details →</span>
                             </div>
                           </div>

@@ -507,6 +507,64 @@ class ApiTracker {
         log.responseStatus = 404;
         responseData = { message: 'Meeting not found' };
       }
+    } else if (path.includes('/ai/chat')) {
+      responseData = {
+        reply: `AI Assistant: I analyzed your request for ${body?.message || 'properties'}. Based on location, budget, and builder score, I recommend checking our top-ranked Jagatpura listings.`,
+        sessionId: body?.sessionId || 'sess-123',
+      };
+    } else if (path.includes('/ai/preferences/extract')) {
+      responseData = {
+        preferences: {
+          preferredLocation: 'Jagatpura',
+          propertyType: 'Villa',
+          bhk: '3',
+          budgetRange: '10000000.00-20000000.00',
+          purpose: 'sale',
+        },
+      };
+    } else if (path.includes('/ai/recommendations/diversity') || path.includes('/ai/recommendations/rank')) {
+      responseData = {
+        success: true,
+        count: 3,
+        data: [
+          {
+            id: 'prop-db-1',
+            propertyCode: 'PROP-VILLA01',
+            title: 'Luxury 3 BHK Villa in Jagatpura',
+            price: '15000000.00',
+            locality: 'Jagatpura',
+            builder: 'Royal Builders',
+            category: 'Villa',
+            bedrooms: 3,
+            matchScore: 96,
+            explanation: '96% Match: Fits budget in Jagatpura with high builder trust rating.',
+          },
+          {
+            id: 'prop-db-2',
+            propertyCode: 'PROP-APT02',
+            title: 'Premium 2 BHK Apartment in Malviya Nagar',
+            price: '8500000.00',
+            locality: 'Malviya Nagar',
+            builder: 'Apex Developers',
+            category: 'Apartment',
+            bedrooms: 2,
+            matchScore: 91,
+            explanation: '91% Match: Diversified locality with prime metro connectivity.',
+          },
+          {
+            id: 'prop-db-3',
+            propertyCode: 'PROP-FLAT03',
+            title: 'Spacious 4 BHK Duplex Flat',
+            price: '18500000.00',
+            locality: 'C-Scheme',
+            builder: 'Mahima Group',
+            category: 'Flat',
+            bedrooms: 4,
+            matchScore: 88,
+            explanation: '88% Match: Freshly listed luxury property with 100% power backup.',
+          },
+        ],
+      };
     } else {
       responseData = { message: 'Mock route not implemented' };
     }
