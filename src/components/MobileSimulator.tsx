@@ -58,8 +58,14 @@ export default function MobileSimulator() {
 
   // Property & Search State
   const [dashboardProperties, setDashboardProperties] = useState<any[]>([]);
+  const [isAiFiltered, setIsAiFiltered] = useState<boolean>(false);
   const [aiQuery, setAiQuery] = useState('Enter your query here');
-  const [aiChatMessages, setAiChatMessages] = useState<Array<{ sender: 'user' | 'ai'; text: string }>>([
+  const [aiChatMessages, setAiChatMessages] = useState<Array<{
+    sender: 'user' | 'ai';
+    text: string;
+    hasResults?: boolean;
+    matchCount?: number;
+  }>>([
     { sender: 'ai', text: '👋 Hi! Tell me what property you are looking for, and I will find the best matches for you.' }
   ]);
   const [extractedBadge, setExtractedBadge] = useState<string | null>(null);
@@ -94,7 +100,29 @@ export default function MobileSimulator() {
       fetchDashboardProperties();
       fetchWishlist();
     }
+    fetchChatHistory();
   }, []);
+
+  // ── Fetch Chat History ──
+  const fetchChatHistory = async () => {
+    try {
+      const historyRes = await api.request('GET', '/ai/chat/history').catch(() => null);
+      const historyList = Array.isArray(historyRes) ? historyRes : historyRes?.data || [];
+      if (Array.isArray(historyList) && historyList.length > 0) {
+        const formattedMessages = historyList.map((item: any) => ({
+          sender: item.sender === 'user' ? ( 'user' as const ) : ( 'ai' as const ),
+          text: item.message || item.text || '',
+          hasResults: item.sender !== 'user',
+        }));
+        setAiChatMessages([
+          { sender: 'ai', text: '👋 Hi! Tell me what property you are looking for, and I will find the best matches for you.' },
+          ...formattedMessages,
+        ]);
+      }
+    } catch (err) {
+      // ignore
+    }
+  };
 
   const handleReset = () => {
     api.setToken(null);
@@ -222,8 +250,12 @@ export default function MobileSimulator() {
         list = Array.isArray(res) ? res : res?.items || res?.data || [];
       }
       setDashboardProperties(list);
+      setIsAiFiltered(false);
+      setExtractedBadge(null);
+      setActiveSearchParams(null);
     } catch (err) {
       setDashboardProperties([]);
+      setIsAiFiltered(false);
     }
   };
 
@@ -288,13 +320,20 @@ export default function MobileSimulator() {
       const aiRes = await api.request('POST', '/ai/preferences/extract', { message: userMsg });
       const prefs = aiRes?.preferences || aiRes || {};
 
+      const isExcludedApartment = /don't show apartment|no flat|no apartment|don't show flat|excluding apartment|excluding flat/i.test(userMsg) || (Array.isArray(prefs.excludedPropertyTypes) && (prefs.excludedPropertyTypes.includes('Apartment') || prefs.excludedPropertyTypes.includes('Flat')));
+      const isExcludedVilla = /don't show villa|no villa|not villa|excluding villa/i.test(userMsg) || (Array.isArray(prefs.excludedPropertyTypes) && prefs.excludedPropertyTypes.includes('Villa'));
+
       let location = prefs.preferredLocation || prefs.location || (Array.isArray(prefs.localities) && prefs.localities.length > 0 ? prefs.localities.join(', ') : '');
-      if (!location) {
+      if (location) {
+        location = location.replace(/\b\d+(\.\d+)?\b/g, '').trim();
+      }
+      if (!location || location.length < 2) {
         if (/ajmer/i.test(userMsg)) location = 'Ajmer Road';
         else if (/jagatpura/i.test(userMsg)) location = 'Jagatpura';
         else if (/mansarovar/i.test(userMsg)) location = 'Mansarovar';
         else if (/malviya/i.test(userMsg)) location = 'Malviya Nagar';
         else if (/vaishali/i.test(userMsg)) location = 'Vaishali Nagar';
+        else if (/jaipur/i.test(userMsg)) location = 'Jaipur';
         else location = 'Jaipur';
       }
 
@@ -306,12 +345,25 @@ export default function MobileSimulator() {
 
       let category = prefs.propertyType || (Array.isArray(prefs.propertyTypes) && prefs.propertyTypes.length > 0 ? prefs.propertyTypes[0] : '');
       if (!category) {
-        if (/villa/i.test(userMsg)) category = 'Villa';
-        else if (/flat|apartment/i.test(userMsg)) category = 'Flat';
-        else category = 'Property';
+        if (/villa/i.test(userMsg) && !isExcludedVilla) category = 'Villa';
+        else if (/flat|apartment/i.test(userMsg) && !isExcludedApartment) category = 'Flat';
+        else if (/plot|land/i.test(userMsg)) category = 'Plot';
+        else if (/commercial/i.test(userMsg)) category = 'Commercial';
+        else category = '';
+      }
+
+      let reqListingType = prefs.listingType || '';
+      if (!reqListingType) {
+        if (/investment|invest/i.test(userMsg)) reqListingType = 'investment';
+        else if (/rent|kiraya/i.test(userMsg)) reqListingType = 'rent';
       }
 
       let budget = prefs.budgetRange || (prefs.maxPrice ? `0-${prefs.maxPrice}` : '');
+      if (!budget) {
+        if (/1\.5\s*crore|1\.5\s*cr/i.test(userMsg)) budget = '0-15000000';
+        else if (/2\s*crore|2\s*cr/i.test(userMsg)) budget = '0-20000000';
+        else if (/1\s*crore|1\s*cr/i.test(userMsg)) budget = '0-10000000';
+      }
 
       // Facing extraction
       let reqFacing = '';
@@ -339,15 +391,17 @@ export default function MobileSimulator() {
       if (/mall|shopping/i.test(userMsg)) reqNearBy.push('Shopping Mall');
 
       const badgeParts = [];
+      if (reqListingType) badgeParts.push(reqListingType.toUpperCase());
       if (bhk) badgeParts.push(`${bhk} BHK`);
       if (category) badgeParts.push(category);
       if (location) badgeParts.push(`in ${location}`);
+      if (isExcludedApartment) badgeParts.push('(No Apartments)');
 
       setExtractedBadge(badgeParts.join(' '));
       setActiveSearchParams({ location, bhk, category, facing: reqFacing, amenities: reqAmenities, nearBy: reqNearBy });
 
       // 2. Save buyer preferences to backend
-      const payload = { preferredLocation: location, propertyType: category, bhk, budgetRange: budget, purpose: 'sale' };
+      const payload = { preferredLocation: location, propertyType: category, bhk, budgetRange: budget, purpose: reqListingType || 'sale' };
       await api.request('POST', '/buyer/preferences', payload).catch(() => { });
 
       // 3. Fetch matching properties from database
@@ -357,6 +411,31 @@ export default function MobileSimulator() {
       if (!matchedList || matchedList.length === 0) {
         matchesRes = await api.request('GET', '/properties').catch(() => null);
         matchedList = Array.isArray(matchesRes) ? matchesRes : matchesRes?.data || [];
+      }
+
+      // Filter OUT negative exclusions!
+      if (isExcludedApartment) {
+        matchedList = matchedList.filter((p: any) => {
+          const pCat = (p.category || '').toLowerCase();
+          const pTitle = (p.title || '').toLowerCase();
+          return !pCat.includes('flat') && !pCat.includes('apartment') && !pTitle.includes('flat') && !pTitle.includes('apartment');
+        });
+      }
+
+      if (isExcludedVilla) {
+        matchedList = matchedList.filter((p: any) => {
+          const pCat = (p.category || '').toLowerCase();
+          const pTitle = (p.title || '').toLowerCase();
+          return !pCat.includes('villa') && !pTitle.includes('villa');
+        });
+      }
+
+      // Filter by Listing Type if requested (e.g. investment)
+      if (reqListingType) {
+        const typeMatches = matchedList.filter((p: any) => (p.listingType || '').toLowerCase() === reqListingType.toLowerCase());
+        if (typeMatches.length > 0) {
+          matchedList = typeMatches;
+        }
       }
 
       // 4. Calculate AI Match score & rank properties strictly according to extracted preferences
@@ -430,22 +509,64 @@ export default function MobileSimulator() {
       });
 
       setAiResultsProperties(matchedList);
+      setDashboardProperties(matchedList);
+      setIsAiFiltered(true);
+
+      // 6. Call /ai/chat for real conversational AI response
+      let chatReply = '';
+      let chatIntent = '';
+      try {
+        const chatRes = await api.request('POST', '/ai/chat', {
+          buyerId: 'buyer-demo-123',
+          message: userMsg,
+          candidateProperties: matchedList.slice(0, 10),
+        });
+        chatReply = chatRes?.reply || chatRes?.response || chatRes?.message || '';
+        chatIntent = chatRes?.intent || '';
+      } catch (e) {
+        // fallback
+      }
+
+      const isGeneralChat = chatIntent === 'GENERAL_CHAT' || (
+        !category && !bhk && !reqFacing && reqAmenities.length === 0 && reqNearBy.length === 0 && (!location || location === 'Jaipur') && !budget && !reqListingType
+      );
+
+      if (!chatReply) {
+        if (isGeneralChat) {
+          chatReply = `AI Assistant: Hello! Main aapka Hobnob AI Assistant hoon. Main aapki Jaipur me property search karne me madad kar sakta hoon.`;
+        } else {
+          chatReply = `AI Assistant: I analyzed your request for "${userMsg}". Found ${matchedList.length} matching properties for your search criteria!`;
+        }
+      }
 
       setAiChatMessages((prev) => [
         ...prev,
-        { sender: 'ai', text: `✨ Found ${matchedList.length} matching database properties for your search criteria!` }
+        {
+          sender: 'ai',
+          text: chatReply,
+          hasResults: !isGeneralChat && matchedList.length > 0,
+          matchCount: isGeneralChat ? 0 : matchedList.length,
+        }
       ]);
 
-      // Redirect to AI Search Results Page
-      setScreen('ai-results');
-      setSuccess(`Discovered ${matchedList.length} database matched properties!`);
-      setTimeout(() => setSuccess(null), 3000);
+      if (!isGeneralChat && matchedList.length > 0) {
+        setSuccess(`AI found ${matchedList.length} matching properties! Click the button below to view.`);
+        setTimeout(() => setSuccess(null), 3500);
+      }
     } catch (err: any) {
       // Fetch direct database properties
       const dbRes = await api.request('GET', '/properties').catch(() => []);
       const dbList = Array.isArray(dbRes) ? dbRes : dbRes?.data || [];
       setAiResultsProperties(dbList);
-      setScreen('ai-results');
+      setAiChatMessages((prev) => [
+        ...prev,
+        {
+          sender: 'ai',
+          text: `Found ${dbList.length} database properties matching your criteria!`,
+          hasResults: true,
+          matchCount: dbList.length,
+        }
+      ]);
     } finally {
       setLoading(false);
     }
@@ -760,14 +881,35 @@ export default function MobileSimulator() {
                 {/* Dashboard Properties Feed */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">Featured Properties</h4>
+                    <div className="flex items-center gap-1.5">
+                      <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                        {isAiFiltered ? '✨ AI Matched Properties' : 'Featured Published Properties'}
+                      </h4>
+                    </div>
                     <span className="text-[10px] text-indigo-400 font-semibold">{dashboardProperties.length} Available</span>
                   </div>
 
+                  {/* AI Active Search Banner & Filter Reset Bar */}
+                  {isAiFiltered && (
+                    <div className="mb-3 p-2.5 bg-indigo-950/60 border border-indigo-500/30 rounded-xl flex items-center justify-between gap-2 shadow-inner">
+                      <div className="flex items-center gap-1.5 text-[10px] text-indigo-200 truncate">
+                        <Sparkles size={13} className="text-indigo-400 shrink-0 animate-pulse" />
+                        <span className="truncate">Filtered: <strong>{extractedBadge || 'AI Natural Query'}</strong></span>
+                      </div>
+                      <button
+                        onClick={fetchDashboardProperties}
+                        className="text-[9px] bg-slate-900 hover:bg-slate-850 text-indigo-300 px-2 py-1 rounded-lg border border-indigo-500/30 font-bold shrink-0 transition"
+                      >
+                        Reset to All
+                      </button>
+                    </div>
+                  )}
+
                   <div className="space-y-3">
-                    {dashboardProperties.slice(0, 4).map((prop) => {
+                    {dashboardProperties.map((prop) => {
                       const isFav = wishlistItems.some((w) => w.id === prop.id || w.propertyId === prop.id);
                       const cover = prop.images?.[0]?.url || 'https://images.unsplash.com/photo-1613977257363-707ba9348227?w=800';
+                      const matchPct = prop.matchScore ? `${prop.matchScore}%` : isAiFiltered ? '90%' : null;
 
                       return (
                         <div
@@ -777,6 +919,15 @@ export default function MobileSimulator() {
                         >
                           <div className="relative h-32 w-full bg-slate-900">
                             <img src={cover} alt={prop.title} className="w-full h-full object-cover" />
+                            
+                            {/* Match Score Badge */}
+                            {matchPct && (
+                              <span className="absolute top-2.5 left-2.5 px-2 py-0.5 text-[9px] font-bold bg-emerald-500/90 text-white rounded-full backdrop-blur-md shadow-md flex items-center gap-1">
+                                <Sparkles size={9} />
+                                {matchPct} Match
+                              </span>
+                            )}
+
                             <button
                               onClick={(e) => toggleWishlist(prop, e)}
                               className="absolute top-2.5 right-2.5 p-1.5 rounded-full bg-slate-950/70 text-white hover:bg-slate-950 transition"
@@ -833,10 +984,20 @@ export default function MobileSimulator() {
                   {aiChatMessages.map((m, idx) => (
                     <div key={idx} className={`flex flex-col ${m.sender === 'user' ? 'items-end' : 'items-start'}`}>
                       <div
-                        className={`max-w-[85%] p-2.5 rounded-2xl text-[11px] leading-relaxed ${m.sender === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-slate-950 border border-slate-850 text-slate-200 rounded-bl-none'
+                        className={`max-w-[88%] p-3 rounded-2xl text-[11px] leading-relaxed ${m.sender === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-slate-950 border border-slate-850 text-slate-200 rounded-bl-none'
                           }`}
                       >
-                        {m.text}
+                        <p>{m.text}</p>
+
+                        {m.sender === 'ai' && m.hasResults && (
+                          <button
+                            onClick={() => setScreen('ai-results')}
+                            className="mt-2.5 w-full text-[10px] font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 shadow-md shadow-emerald-900/40 border border-emerald-400/30 transition transform active:scale-95 cursor-pointer"
+                          >
+                            <Sparkles size={12} className="text-emerald-200" />
+                            <span>View {m.matchCount || aiResultsProperties.length} Matched Properties →</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
